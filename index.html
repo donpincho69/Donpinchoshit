@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex,nofollow">
+<meta name="theme-color" content="#07070d">
+<title>Notas</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- ACCESO -->
+<div id="login" class="loginwrap">
+  <form id="loginForm" autocomplete="off">
+    <h1>Acceso</h1>
+    <input id="lEmail" type="email" placeholder="Correo" autocomplete="off" required>
+    <input id="lPass" type="password" placeholder="Clave" autocomplete="off" required>
+    <button class="btn" type="submit">Entrar</button>
+    <p id="loginMsg" class="msg"></p>
+  </form>
+</div>
+
+<!-- APP -->
+<div id="app" class="hidden">
+  <header class="top">
+    <button id="btnSide" class="icon only-mobile" title="Carpetas">☰</button>
+    <nav class="tabs">
+      <button class="tab on" data-tab="lib">Biblioteca</button>
+      <button class="tab" data-tab="screen">Pantalla <span id="pCount" class="count"></span></button>
+    </nav>
+    <span class="grow"></span>
+    <button id="btnRhythm" class="btn ghost small">Ritmo</button>
+    <button id="btnLock" class="btn danger small" title="Bloquear ya (también: Esc dos veces)">✕</button>
+  </header>
+
+  <main>
+    <!-- BIBLIOTECA -->
+    <section id="lib">
+      <aside id="side"></aside>
+      <div id="libMain">
+        <div class="libhead">
+          <div id="crumb" class="crumb"></div>
+          <div class="libtools">
+            <input id="q" type="search" placeholder="Buscar…">
+            <select id="sort">
+              <option value="new">Más nuevos</option>
+              <option value="old">Más viejos</option>
+              <option value="name">Nombre A–Z</option>
+            </select>
+            <button id="btnAdd" class="btn">＋ Agregar</button>
+          </div>
+        </div>
+        <div id="subs" class="subs"></div>
+        <div id="grid" class="grid"></div>
+        <p id="emptyLib" class="muted hidden">No hay nada acá todavía. Tocá “＋ Agregar”.</p>
+      </div>
+    </section>
+
+    <!-- PANTALLA DIVIDIDA -->
+    <section id="screen" class="hidden">
+      <div class="toolbar">
+        <button id="tbLib" class="btn small">＋ De la biblioteca</button>
+        <form id="quickForm" class="quick">
+          <input id="quickUrl" placeholder="Pegar link de X o PH">
+          <button class="btn small" type="submit">Agregar</button>
+        </form>
+        <button id="tbMode" class="btn ghost small">Modo: Cuadrícula</button>
+        <button id="tbBg" class="btn ghost small">Fondo</button>
+        <button id="tbSave" class="btn ghost small">Guardar escena</button>
+        <button id="tbScenes" class="btn ghost small">Escenas</button>
+        <button id="tbStop" class="btn ghost small">Pausar todo</button>
+        <button id="tbClear" class="btn ghost small">Vaciar</button>
+      </div>
+      <div class="stage">
+        <div id="canvas" class="canvas grid"></div>
+        <div id="emptyCanvas" class="emptyc">
+          <p>La pantalla está vacía.</p>
+          <p class="muted">Agregá videos o imágenes desde la biblioteca, o pegá un link arriba. Podés poner todos los que quieras.</p>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<!-- RITMO -->
+<aside id="rhythm" class="drawer hidden">
+  <div class="dhead"><b>Ritmo</b><button id="rClose" class="icon">✕</button></div>
+  <div class="rtop"><span id="rDot" class="dot"></span><span id="rBpm" class="bpm">—</span><small>pulsos por minuto</small></div>
+  <button id="rPlay" class="btn big">▶ Iniciar</button>
+
+  <label>Modo
+    <select id="rMode">
+      <option value="fixed">Fijo</option>
+      <option value="ramp">Sube y baja</option>
+      <option value="wave">Olas suaves</option>
+      <option value="steps">Escalones</option>
+      <option value="random">Al azar</option>
+    </select>
+  </label>
+
+  <div id="rFixedRow">
+    <label>Velocidad <output id="oFixed">80</output>
+      <input id="rFixed" type="range" min="30" max="220" value="80"></label>
+  </div>
+
+  <div id="rRangeRow" class="hidden">
+    <label>Mínima <output id="oMin">60</output>
+      <input id="rMin" type="range" min="30" max="220" value="60"></label>
+    <label>Máxima <output id="oMax">120</output>
+      <input id="rMax" type="range" min="30" max="220" value="120"></label>
+    <label>Cambia cada <output id="oPer">30</output> seg
+      <input id="rPer" type="range" min="5" max="120" value="30"></label>
+  </div>
+
+  <label>Sonido
+    <select id="rSound">
+      <option value="click">Clic</option>
+      <option value="wood">Madera</option>
+      <option value="thud">Golpe suave</option>
+      <option value="tone">Tono</option>
+    </select>
+  </label>
+  <label>Volumen
+    <input id="rVol" type="range" min="0" max="100" value="60"></label>
+  <label id="rVibRow" class="chk"><input id="rVib" type="checkbox"> Vibrar (celu)</label>
+  <p class="muted s">Mientras está andando, la pantalla del celu se mantiene encendida.</p>
+</aside>
+
+<!-- VENTANA EMERGENTE -->
+<div id="modal" class="hidden"><div id="modalBody"></div></div>
+<div id="toast"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="config.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
