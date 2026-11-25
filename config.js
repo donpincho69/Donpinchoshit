@@ -4,7 +4,7 @@
 // =====================================================
 window.APP_CONFIG = {
   // Dirección de tu proyecto en Supabase (empieza con https://)
-  SUPABASE_URL: 'https://iptbzsqujxmfzdxqzhub.supabase.co/rest/v1/',
+  SUPABASE_URL: 'https://iptbzsqujxmfzdxqzhub.supabase.co',
 
   // Clave pública de tu proyecto ("anon" o "publishable").
   // Es seguro que esté acá: tus datos los protege el usuario y la clave.
