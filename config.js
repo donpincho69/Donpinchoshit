@@ -4,11 +4,11 @@
 // =====================================================
 window.APP_CONFIG = {
   // Dirección de tu proyecto en Supabase (empieza con https://)
-  SUPABASE_URL: 'PEGA_AQUI_TU_URL',
+  SUPABASE_URL: 'https://iptbzsqujxmfzdxqzhub.supabase.co/rest/v1/',
 
   // Clave pública de tu proyecto ("anon" o "publishable").
   // Es seguro que esté acá: tus datos los protege el usuario y la clave.
-  SUPABASE_ANON_KEY: 'PEGA_AQUI_TU_CLAVE_PUBLICA',
+  SUPABASE_ANON_KEY: 'sb_publishable_TgfLUnbPrKW1iJe4yx1u3w_DS366SYT',
 
   // Minutos sin tocar nada antes de bloquearse sola. Poné 0 para desactivarlo.
   IDLE_MINUTES: 30
