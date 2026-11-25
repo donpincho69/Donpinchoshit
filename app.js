@@ -977,7 +977,17 @@ function bindUI() {
     if (!sb) return;
     $('#loginMsg').textContent = '…';
     const { data, error } = await sb.auth.signInWithPassword({ email: $('#lEmail').value.trim(), password: $('#lPass').value });
-    if (error) { $('#loginMsg').textContent = 'Datos incorrectos.'; return; }
+    if (error) {
+      const m = String(error.message || '');
+      let txt;
+      if (/invalid login credentials/i.test(m)) txt = 'Correo o clave incorrectos (o ese usuario no existe en este proyecto).';
+      else if (/not confirmed/i.test(m)) txt = 'El correo todavía no está confirmado en Supabase.';
+      else if (/invalid api key|apikey/i.test(m)) txt = 'La clave pegada en config.js no es válida.';
+      else if (/failed to fetch|network/i.test(m)) txt = 'No se pudo conectar. Revisá la URL en config.js y tu internet.';
+      else txt = 'Error: ' + m;
+      $('#loginMsg').textContent = txt;
+      return;
+    }
     $('#lPass').value = '';
     $('#loginMsg').textContent = '';
     start(data.user);
