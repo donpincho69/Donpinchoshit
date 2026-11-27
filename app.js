@@ -14,7 +14,7 @@ const uid = () => (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : (
 let sb = null;
 const S = {
   user: null, folders: [], items: [], layouts: [],
-  view: { type: 'all', id: null }, search: '', tag: null, sort: 'new',
+  view: { type: 'all', id: null }, search: '', tag: null, sort: 'new', type: 'all', lastErr: '',
   panels: [], mode: 'grid', bg: null, urls: {}, z: 10
 };
 
@@ -133,7 +133,9 @@ function init() {
     $('#loginForm').classList.add('disabled');
     return;
   }
-  sb = window.supabase.createClient(cfg.SUPABASE_URL, cfg.SUPABASE_ANON_KEY, {
+  let baseUrl = String(cfg.SUPABASE_URL).trim();
+  try { baseUrl = new URL(baseUrl).origin; } catch (e) {}
+  sb = window.supabase.createClient(baseUrl, String(cfg.SUPABASE_ANON_KEY).trim(), {
     auth: { storage: window.sessionStorage, persistSession: true, autoRefreshToken: true, detectSessionInUrl: false }
   });
   sb.auth.getSession().then(({ data }) => {
@@ -153,6 +155,8 @@ async function start(user) {
 
 async function lock() {
   stopRhythm();
+  pfStop(true);
+  $('#photosDrawer').classList.add('hidden');
   clearPanels();
   try { if (document.fullscreenElement) document.exitFullscreen(); } catch (e) {}
   S.user = null; S.folders = []; S.items = []; S.layouts = []; S.urls = {}; S.bg = null;
@@ -240,6 +244,13 @@ function renderSide() {
   $('#side').innerHTML = h;
 }
 
+function typeMatch(i, t) {
+  if (t === 'video') return i.kind === 'x' || i.kind === 'ph' || (i.kind === 'file' && (i.mime || '').startsWith('video'));
+  if (t === 'image') return i.kind === 'file' && (i.mime || '').startsWith('image');
+  if (t === 'link') return i.kind === 'link';
+  return true;
+}
+
 function visibleItems() {
   let list = S.items;
   const q = S.search.trim().toLowerCase();
@@ -253,6 +264,7 @@ function visibleItems() {
     else if (v.type === 'folder') list = list.filter(i => i.folder_id === v.id);
   }
   if (S.tag) list = list.filter(i => (i.tags || []).includes(S.tag));
+  if (S.type !== 'all') list = list.filter(i => typeMatch(i, S.type));
   list = list.slice();
   if (S.sort === 'old') list.sort((a, b) => a.created_at.localeCompare(b.created_at));
   else if (S.sort === 'name') list.sort((a, b) => (a.title || defaultTitle(a)).localeCompare(b.title || defaultTitle(b)));
@@ -366,6 +378,16 @@ function folderOptions(sel) {
   return `<option value="">(Sin carpeta)</option>` + flatFolders().map(({ f, depth }) =>
     `<option value="${f.id}" ${f.id === sel ? 'selected' : ''}>${'— '.repeat(depth)}${esc(f.name)}</option>`).join('');
 }
+function errText(e) {
+  const m = String((e && (e.message || e.error_description || e.error)) || e || '');
+  if (/relation .* does not exist|could not find the table|schema cache/i.test(m)) return 'Falta preparar la base de datos: pegá setup.sql en Supabase (SQL Editor) y tocá Run.';
+  if (/bucket not found/i.test(m)) return 'Falta el almacenamiento “biblioteca”: ejecutá setup.sql de nuevo en Supabase.';
+  if (/row-level security|violates row/i.test(m)) return 'Supabase bloqueó el permiso: ejecutá setup.sql completo de nuevo.';
+  if (/exceeded the maximum allowed size|too large|payload/i.test(m)) return 'El archivo es demasiado grande para el plan gratis.';
+  if (/jwt|not authenticated|expired/i.test(m)) return 'La sesión venció: bloqueá y volvé a entrar.';
+  if (/failed to fetch|network/i.test(m)) return 'Sin conexión con Supabase. Revisá internet y la URL de config.js.';
+  return m || 'Error desconocido';
+}
 function parseTags(s) {
   return [...new Set(String(s || '').split(',').map(t => t.trim().toLowerCase().replace(/^#/, '')).filter(Boolean))].slice(0, 20);
 }
@@ -425,6 +447,7 @@ async function addLinks(text, folderId, tags, title) {
   const parts = String(text || '').split(/\s+/).filter(Boolean);
   if (!parts.length) return 'Pegá al menos un link.';
   let added = 0, dup = 0, bad = 0;
+  S.lastErr = '';
   for (const raw of parts) {
     const pl = parseLink(raw);
     if (!pl) { bad++; continue; }
@@ -433,29 +456,30 @@ async function addLinks(text, folderId, tags, title) {
     if (exists) { dup++; continue; }
     const row = { kind: pl.kind, url: pl.url, folder_id: folderId, tags, title: (parts.length === 1 && title) ? title : null };
     const { data, error } = await sb.from('items').insert(row).select().single();
-    if (error) { bad++; continue; }
+    if (error) { bad++; S.lastErr = errText(error); continue; }
     S.items.unshift(data); added++;
   }
-  return `Guardados: ${added}` + (dup ? ` · Ya estaban: ${dup}` : '') + (bad ? ` · Con problemas: ${bad}` : '');
+  return `Guardados: ${added}` + (dup ? ` · Ya estaban: ${dup}` : '') + (bad ? ` · Con problemas: ${bad}` : '') + (S.lastErr ? ` — Motivo: ${S.lastErr}` : '');
 }
 
 async function uploadFiles(files, folderId, tags, progress) {
   let ok = 0, fail = 0;
+  S.lastErr = '';
   for (let i = 0; i < files.length; i++) {
     const f = files[i];
     const isMedia = (f.type || '').startsWith('image/') || (f.type || '').startsWith('video/');
-    if (!isMedia) { fail++; continue; }
+    if (!isMedia) { fail++; S.lastErr = 'El archivo no es una imagen ni un video.'; continue; }
     progress(`Subiendo ${i + 1} de ${files.length}…`);
     const ext = ((f.name.split('.').pop() || 'bin').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 5)) || 'bin';
     const path = `${S.user.id}/${uid()}.${ext}`;
     const up = await sb.storage.from(BUCKET).upload(path, f, { contentType: f.type, upsert: false });
-    if (up.error) { fail++; continue; }
+    if (up.error) { fail++; S.lastErr = errText(up.error); continue; }
     const row = { kind: 'file', file_path: path, mime: f.type, title: f.name.replace(/\.[^.]+$/, ''), folder_id: folderId, tags };
     const { data, error } = await sb.from('items').insert(row).select().single();
-    if (error) { fail++; await sb.storage.from(BUCKET).remove([path]); continue; }
+    if (error) { fail++; S.lastErr = errText(error); await sb.storage.from(BUCKET).remove([path]); continue; }
     S.items.unshift(data); ok++;
   }
-  return `Subidos: ${ok}` + (fail ? ` · Con problemas: ${fail}` : '');
+  return `Subidos: ${ok}` + (fail ? ` · Con problemas: ${fail}` : '') + (S.lastErr ? ` — Motivo: ${S.lastErr}` : '');
 }
 
 /* =====================================================
@@ -501,7 +525,7 @@ function editItem(id) {
     const { error } = await sb.from('items').delete().eq('id', it.id);
     if (error) { toast('No se pudo eliminar'); return; }
     S.items = S.items.filter(x => x.id !== it.id);
-    S.panels.filter(p => p.itemId === it.id).forEach(p => removePanel(p.pid));
+    S.panels.filter(p => p.itemId === it.id || (p.itemIds || []).includes(it.id)).forEach(p => removePanel(p.pid));
     render();
   };
 }
@@ -521,6 +545,10 @@ function loadTwitter() {
     document.head.appendChild(s);
   });
   return twP;
+}
+
+function itemsToGallery(imgs) {
+  return { kind: 'gallery', itemIds: imgs.map(i => i.id), idx: 0, title: `Galería (${imgs.length})` };
 }
 
 function itemToPanel(it) {
@@ -569,9 +597,13 @@ function buildPanel(p) {
       } else {
         const im = document.createElement('img');
         im.src = u; im.alt = '';
+        im.style.cursor = 'zoom-in';
+        im.onclick = () => openLightbox(u);
         body.innerHTML = ''; body.appendChild(im);
       }
     });
+  } else if (p.kind === 'gallery') {
+    buildGallery(p, body);
   } else {
     body.innerHTML = fallbackHtml(p);
   }
@@ -592,6 +624,26 @@ function buildPanel(p) {
   enableDrag(el, p);
   enableResize(el, p);
   $('#canvas').appendChild(el);
+}
+
+function buildGallery(p, body) {
+  const its = (p.itemIds || []).map(id => S.items.find(i => i.id === id)).filter(Boolean);
+  if (!its.length) { body.innerHTML = fallbackHtml(p); return; }
+  if (p.idx == null || p.idx >= its.length) p.idx = 0;
+  body.innerHTML = `<div class="gal"><img alt=""><button class="gnav gprev">‹</button><button class="gnav gnext">›</button><span class="gcnt"></span></div>`;
+  const img = $('img', body), cnt = $('.gcnt', body);
+  let cur = '';
+  const show = async () => {
+    const it = its[p.idx];
+    cnt.textContent = `${p.idx + 1} / ${its.length}`;
+    const arr = await signedUrls([it.file_path]);
+    cur = arr[0] || '';
+    if (cur) img.src = cur;
+  };
+  $('.gprev', body).onclick = () => { p.idx = (p.idx - 1 + its.length) % its.length; show(); };
+  $('.gnext', body).onclick = () => { p.idx = (p.idx + 1) % its.length; show(); };
+  img.onclick = () => { if (cur) openLightbox(cur); };
+  show();
 }
 
 function addPanel(p) {
@@ -744,28 +796,91 @@ function stopAllMedia() {
   $$('#canvas iframe').forEach(f => { const s = f.src; f.src = s; });
 }
 
-function openPicker(opts) {
-  const onlyImages = !!opts.onlyImages;
-  const b = openModal(`<h3>${esc(opts.title)}</h3><input id="pkQ" placeholder="Buscar…">
-    <div id="pkList" class="pklist"></div>
+function openLightbox(u) {
+  const b = openModal(`<img src="${esc(u)}" alt="" style="width:100%;max-height:78vh;object-fit:contain;border-radius:8px">
     <div class="row end"><button class="btn ghost" data-act="close">Cerrar</button></div>`);
-  const draw = () => {
+  $('#modalBody').style.maxWidth = 'min(92vw, 1000px)';
+  $('[data-act=close]', b).onclick = closeModal;
+}
+
+function openPicker(opts) {
+  const single = typeof opts.onPick === 'function';
+  const sel = new Set();
+  let type = opts.onlyImages ? 'image' : (opts.type || 'all');
+  const typeBtns = opts.onlyImages ? '' : '<button data-t="all">Todo</button><button data-t="video">Videos</button>';
+  const folderOpts = flatFolders().map(({ f, depth }) => `<option value="${f.id}">${'— '.repeat(depth)}${esc(f.name)}</option>`).join('');
+  const b = openModal(`<h3>${esc(opts.title)}</h3>
+    <div class="mtabs" id="pkTypes">${typeBtns}<button data-t="image">Imágenes</button></div>
+    <select id="pkFolder"><option value="">(Todas las carpetas)</option>${folderOpts}</select>
+    <input id="pkQ" placeholder="Buscar…" style="margin-top:6px">
+    <div id="pkList" class="pklist"></div>
+    <div class="row"><span id="pkSel" class="muted s grow"></span>
+      ${single ? '' : '<button class="btn ghost small" data-act="all">Elegir todo</button><button class="btn ghost small" data-act="none">Ninguno</button>'}
+    </div>
+    <div class="row end">
+      <button class="btn ghost" data-act="close">Cerrar</button>
+      ${single ? '' : '<button class="btn ghost" data-act="gallery">Juntar en una galería</button><button class="btn" data-act="add">Agregar</button>'}
+    </div>`);
+
+  const filtered = () => {
     const q = $('#pkQ', b).value.trim().toLowerCase();
-    let list = S.items.filter(i => !onlyImages || (i.kind === 'file' && (i.mime || '').startsWith('image')));
+    const fid = $('#pkFolder', b).value;
+    const ids = fid ? descendantIds(fid) : null;
+    let list = S.items.filter(i => i.kind !== 'link' && typeMatch(i, type));
+    if (ids) list = list.filter(i => ids.includes(i.folder_id));
     if (q) list = list.filter(i => [i.title, i.url, (i.tags || []).join(' ')].join(' ').toLowerCase().includes(q));
-    list = list.slice(0, 200);
-    $('#pkList', b).innerHTML = list.map(i => `<div class="pkrow" data-id="${i.id}"><span class="badge s">${kindLabel(i)}</span><span>${esc(i.title || defaultTitle(i))}</span></div>`).join('')
-      || '<p class="muted">No hay nada para elegir.</p>';
+    return list.slice(0, 300);
+  };
+  const updSel = () => {
+    $('#pkSel', b).textContent = single ? '' : (sel.size ? `${sel.size} elegidos` : 'Tocá para elegir varios');
+    $$('#pkTypes [data-t]', b).forEach(x => x.classList.toggle('on', x.dataset.t === type));
+  };
+  const draw = () => {
+    const list = filtered();
+    $('#pkList', b).innerHTML = list.map(i =>
+      `<div class="pkrow ${sel.has(i.id) ? 'on' : ''}" data-id="${i.id}">${single ? '' : `<input type="checkbox" class="pkchk" ${sel.has(i.id) ? 'checked' : ''} tabindex="-1">`}<span class="badge s">${kindLabel(i)}</span><span>${esc(i.title || defaultTitle(i))}</span></div>`
+    ).join('') || '<p class="muted">No hay nada para elegir.</p>';
+    updSel();
   };
   draw();
+
   $('#pkQ', b).oninput = draw;
-  $('[data-act=close]', b).onclick = closeModal;
+  $('#pkFolder', b).onchange = draw;
+  $('#pkTypes', b).onclick = e => {
+    const t = e.target.closest('[data-t]');
+    if (t) { type = t.dataset.t; draw(); }
+  };
   $('#pkList', b).onclick = e => {
     const row = e.target.closest('.pkrow');
     if (!row) return;
     const it = S.items.find(i => i.id === row.dataset.id);
-    if (it) opts.onPick(it);
+    if (!it) return;
+    if (single) { opts.onPick(it); return; }
+    if (sel.has(it.id)) sel.delete(it.id); else sel.add(it.id);
+    row.classList.toggle('on', sel.has(it.id));
+    const chk = $('.pkchk', row);
+    if (chk) chk.checked = sel.has(it.id);
+    updSel();
   };
+  $$('[data-act]', b).forEach(btn => btn.onclick = () => {
+    const a = btn.dataset.act;
+    if (a === 'close') { closeModal(); return; }
+    if (a === 'all') { filtered().forEach(i => sel.add(i.id)); draw(); return; }
+    if (a === 'none') { sel.clear(); draw(); return; }
+    const its = [...sel].map(id => S.items.find(i => i.id === id)).filter(Boolean);
+    if (!its.length) { toast('Elegí al menos uno'); return; }
+    if (a === 'add') {
+      its.forEach(addPanelFromItem);
+      closeModal();
+      toast(`Agregados: ${its.length}`);
+    } else if (a === 'gallery') {
+      const imgs = its.filter(i => i.kind === 'file' && (i.mime || '').startsWith('image'));
+      if (imgs.length < 2) { toast('Elegí al menos 2 imágenes'); return; }
+      addPanel(itemsToGallery(imgs));
+      closeModal();
+      toast('Galería agregada');
+    }
+  });
   $('#pkQ', b).focus();
 }
 
@@ -775,7 +890,7 @@ async function saveScene() {
   if (!name) return;
   const data = {
     mode: S.mode, bg: S.bg || null,
-    panels: S.panels.map(p => ({ itemId: p.itemId || null, url: p.itemId ? null : (p.url || null), x: p.x == null ? null : p.x, y: p.y == null ? null : p.y, w: p.w == null ? null : p.w, h: p.h == null ? null : p.h }))
+    panels: S.panels.map(p => ({ itemIds: p.itemIds || null, itemId: p.itemId || null, url: p.itemId ? null : (p.url || null), x: p.x == null ? null : p.x, y: p.y == null ? null : p.y, w: p.w == null ? null : p.w, h: p.h == null ? null : p.h }))
   };
   const { data: row, error } = await sb.from('layouts').insert({ name, data }).select().single();
   if (error) { toast('No se pudo guardar la escena'); return; }
@@ -790,7 +905,10 @@ function loadScene(sc) {
   S.bg = d.bg || null;
   for (const q of (d.panels || [])) {
     let p = null;
-    if (q.itemId) {
+    if (q.itemIds && q.itemIds.length) {
+      const imgs = q.itemIds.map(id => S.items.find(i => i.id === id)).filter(Boolean);
+      if (imgs.length) p = itemsToGallery(imgs);
+    } else if (q.itemId) {
       const it = S.items.find(i => i.id === q.itemId);
       if (it) p = itemToPanel(it);
     } else if (q.url) {
@@ -837,7 +955,9 @@ function openScenes() {
 const R = {
   ctx: null, master: null, on: false, timer: null, uiT: null, next: 0, t0: 0, cur: 80,
   mode: 'fixed', fixed: 80, min: 60, max: 120, period: 30, vol: 0.6, sound: 'click', vib: false,
-  bpm: 90, target: 90, until: 0, wake: null
+  bpm: 90, target: 90, until: 0, wake: null,
+  rest: false, restEvery: 60, restFor: 8, nextRest: Infinity, restUntil: 0,
+  finale: false, finalBpm: 180, finBpm: 180
 };
 
 function readRhythm() {
@@ -850,13 +970,23 @@ function readRhythm() {
   R.vol = +$('#rVol').value / 100;
   R.sound = $('#rSound').value;
   R.vib = $('#rVib').checked;
+  R.rest = $('#rRest').checked;
+  R.restEvery = +$('#rRestEvery').value;
+  R.restFor = +$('#rRestFor').value;
+  R.finalBpm = +$('#rFinalBpm').value;
   $('#oFixed').textContent = R.fixed;
   $('#oMin').textContent = $('#rMin').value;
   $('#oMax').textContent = $('#rMax').value;
   $('#oPer').textContent = R.period;
+  $('#oRestEvery').textContent = R.restEvery;
+  $('#oRestFor').textContent = R.restFor;
+  $('#oFinal').textContent = R.finalBpm;
   $('#rFixedRow').classList.toggle('hidden', R.mode !== 'fixed');
   $('#rRangeRow').classList.toggle('hidden', R.mode === 'fixed');
+  $('#rRestRow').classList.toggle('hidden', !R.rest);
   if (R.master) R.master.gain.value = R.vol * R.vol;
+  if (!R.rest) R.nextRest = Infinity;
+  else if (R.on && !isFinite(R.nextRest)) R.nextRest = (R.ctx.currentTime - R.t0) + R.restEvery * (0.5 + Math.random());
 }
 
 function bpmAt(t) {
@@ -871,6 +1001,18 @@ function bpmAt(t) {
     case 'steps': {
       const seq = [0, 1, 2, 3, 4, 3, 2, 1];
       return R.min + span * seq[Math.floor(t / P) % seq.length] / 4;
+    }
+    case 'jump': {
+      if (t >= R.until) {
+        let nb = R.bpm;
+        for (let k = 0; k < 8; k++) {
+          nb = R.min + Math.random() * span;
+          if (Math.abs(nb - R.bpm) > span * 0.25) break;
+        }
+        R.bpm = nb;
+        R.until = t + P * (0.4 + Math.random() * 1.2);
+      }
+      return R.bpm;
     }
     case 'random': {
       if (t >= R.until) {
@@ -916,7 +1058,22 @@ function tick() {
   const ctx = R.ctx;
   while (R.next < ctx.currentTime + 0.6) {
     const t = Math.max(0, R.next - R.t0);
-    const b = Math.max(20, Math.min(300, bpmAt(t)));
+    if (R.rest && !R.finale && t >= R.nextRest) {
+      R.restUntil = t + R.restFor * (0.5 + Math.random());
+      R.nextRest = R.restUntil + R.restEvery * (0.5 + Math.random());
+    }
+    if (R.rest && !R.finale && t < R.restUntil) {
+      R.next = R.t0 + R.restUntil + 0.001;
+      continue;
+    }
+    let b;
+    if (R.finale) {
+      R.finBpm += (R.finalBpm - R.finBpm) * 0.25;
+      b = R.finBpm;
+    } else {
+      b = bpmAt(t);
+    }
+    b = Math.max(20, Math.min(300, b));
     R.cur = b;
     beat(R.next);
     R.next += 60 / b;
@@ -939,9 +1096,15 @@ function startRhythm() {
   R.bpm = (R.min + R.max) / 2; R.target = R.bpm; R.until = 0;
   R.t0 = R.ctx.currentTime;
   R.next = R.t0 + 0.1;
+  R.restUntil = 0;
+  R.nextRest = R.rest ? R.restEvery * (0.5 + Math.random()) : Infinity;
   R.on = true;
   R.timer = setInterval(tick, 100);
-  R.uiT = setInterval(() => { $('#rBpm').textContent = Math.round(R.cur); bumpIdle(); }, 300);
+  R.uiT = setInterval(() => {
+    const tn = R.ctx ? R.ctx.currentTime - R.t0 : 0;
+    $('#rBpm').textContent = (R.rest && !R.finale && tn < R.restUntil) ? 'pausa' : Math.round(R.cur);
+    bumpIdle();
+  }, 300);
   tick();
   wakeOn();
   $('#rPlay').textContent = '■ Detener';
@@ -950,6 +1113,8 @@ function startRhythm() {
 function stopRhythm() {
   if (!R.on) return;
   R.on = false;
+  R.finale = false;
+  $('#btnFinale').classList.remove('on');
   clearInterval(R.timer); clearInterval(R.uiT);
   try { R.ctx.close(); } catch (e) {}
   R.ctx = null; R.master = null;
@@ -957,6 +1122,125 @@ function stopRhythm() {
   R.wake = null;
   $('#rPlay').textContent = '▶ Iniciar';
   $('#rBpm').textContent = '—';
+}
+
+function toggleFinale() {
+  readRhythm();
+  if (R.finale) {
+    R.finale = false;
+    $('#btnFinale').classList.remove('on');
+    toast('Velocidad rápida desactivada');
+    return;
+  }
+  R.finBpm = R.cur > 0 ? R.cur : (R.mode === 'fixed' ? R.fixed : (R.min + R.max) / 2);
+  R.finale = true;
+  $('#btnFinale').classList.add('on');
+  if (!R.on) startRhythm();
+  toast('Velocidad rápida activada');
+}
+
+/* =====================================================
+   FOTOS AL AZAR (aparecen, flotan y se desvanecen)
+   ===================================================== */
+const PF = { on: false, timer: null, last: null, active: 0 };
+const rnd = (a, b) => a + Math.random() * (b - a);
+
+function pfImages() {
+  const folderId = $('#pfFolder').value;
+  let list = S.items.filter(i => i.kind === 'file' && (i.mime || '').startsWith('image'));
+  if (folderId) {
+    const ids = $('#pfSub').checked ? descendantIds(folderId) : [folderId];
+    list = list.filter(i => ids.includes(i.folder_id));
+  }
+  return list;
+}
+
+function pfRefreshInfo() {
+  const n = pfImages().length;
+  $('#pfInfo').textContent = n ? `${n} imágenes disponibles` : 'No hay imágenes en esa carpeta.';
+}
+
+function readPhotos() {
+  $('#oPfMin').textContent = $('#pfMin').value;
+  $('#oPfMax').textContent = $('#pfMax').value;
+  $('#oPfStayMin').textContent = $('#pfStayMin').value;
+  $('#oPfStayMax').textContent = $('#pfStayMax').value;
+  $('#oPfCount').textContent = $('#pfCount').value;
+}
+
+function pfSchedule() {
+  if (!PF.on) return;
+  const lo = +$('#pfMin').value, hi = Math.max(lo, +$('#pfMax').value);
+  PF.timer = setTimeout(() => { pfShow(); pfSchedule(); }, rnd(lo, hi) * 1000);
+}
+
+async function pfShow() {
+  const list = pfImages();
+  if (!list.length || PF.active >= +$('#pfCount').value) return;
+  let it = list[Math.floor(Math.random() * list.length)];
+  for (let k = 0; k < 6 && list.length > 1 && it.id === PF.last; k++) it = list[Math.floor(Math.random() * list.length)];
+  PF.last = it.id;
+  PF.active++;
+  const arr = await signedUrls([it.file_path]);
+  const u = arr[0];
+  if (!u || !PF.on) { PF.active = Math.max(0, PF.active - 1); return; }
+  const img = document.createElement('img');
+  img.className = 'pop';
+  img.alt = '';
+  const drop = () => { img.remove(); PF.active = Math.max(0, PF.active - 1); };
+  img.onerror = drop;
+  img.onload = () => {
+    if (!PF.on) { drop(); return; }
+    const vw = window.innerWidth, vh = window.innerHeight, base = Math.min(vw, vh);
+    const m = $('#pfSize').value;
+    const frac = m === 's' ? rnd(0.2, 0.3) : m === 'm' ? rnd(0.35, 0.5) : m === 'l' ? rnd(0.6, 0.85) : rnd(0.2, 0.85);
+    const box = Math.max(120, base * frac);
+    const sc = Math.min(box / img.naturalWidth, box / img.naturalHeight);
+    const w = Math.max(60, Math.round(img.naturalWidth * sc));
+    const h = Math.max(60, Math.round(img.naturalHeight * sc));
+    img.style.width = w + 'px';
+    img.style.height = h + 'px';
+    img.style.left = Math.round(rnd(0, Math.max(0, vw - w))) + 'px';
+    img.style.top = Math.round(rnd(0, Math.max(0, vh - h))) + 'px';
+    img.style.setProperty('--rot', rnd(-4, 4).toFixed(1) + 'deg');
+    requestAnimationFrame(() => requestAnimationFrame(() => img.classList.add('in')));
+    const lo = +$('#pfStayMin').value, hi = Math.max(lo, +$('#pfStayMax').value);
+    setTimeout(() => { img.classList.remove('in'); setTimeout(drop, 1400); }, rnd(lo, hi) * 1000);
+  };
+  img.src = u;
+  $('#photoLayer').appendChild(img);
+}
+
+function pfStart() {
+  if (!pfImages().length) { toast('No hay imágenes en esa carpeta.'); return; }
+  PF.on = true;
+  $('#pfPlay').textContent = '■ Detener';
+  pfShow();
+  pfSchedule();
+}
+
+function pfStop(instant) {
+  PF.on = false;
+  clearTimeout(PF.timer);
+  const layer = $('#photoLayer');
+  if (instant) layer.innerHTML = '';
+  else $$('.pop', layer).forEach(p => { p.classList.remove('in'); setTimeout(() => p.remove(), 1400); });
+  PF.active = 0;
+  const btn = $('#pfPlay');
+  if (btn) btn.textContent = '▶ Iniciar';
+}
+
+function openPhotos() {
+  const d = $('#photosDrawer');
+  const wasHidden = d.classList.contains('hidden');
+  $('#rhythm').classList.add('hidden');
+  if (!wasHidden) { d.classList.add('hidden'); return; }
+  const cur = $('#pfFolder').value;
+  $('#pfFolder').innerHTML = `<option value="">Todas las imágenes</option>` + flatFolders().map(({ f, depth }) =>
+    `<option value="${f.id}" ${f.id === cur ? 'selected' : ''}>${'— '.repeat(depth)}${esc(f.name)}</option>`).join('');
+  d.classList.remove('hidden');
+  readPhotos();
+  pfRefreshInfo();
 }
 
 /* =====================================================
@@ -997,7 +1281,21 @@ function bindUI() {
   $$('.tab').forEach(b => b.addEventListener('click', () => setTab(b.dataset.tab)));
   $('#btnLock').addEventListener('click', lock);
   $('#btnSide').addEventListener('click', () => document.body.classList.toggle('sideopen'));
-  $('#btnRhythm').addEventListener('click', () => $('#rhythm').classList.toggle('hidden'));
+  $('#btnRhythm').addEventListener('click', () => { $('#photosDrawer').classList.add('hidden'); $('#rhythm').classList.toggle('hidden'); });
+  $('#btnFinale').addEventListener('click', toggleFinale);
+  $('#typeBar').addEventListener('click', e => {
+    const t = e.target.closest('[data-type]');
+    if (!t) return;
+    S.type = t.dataset.type;
+    $$('#typeBar [data-type]').forEach(x => x.classList.toggle('on', x === t));
+    renderLib();
+  });
+  $('#tbImgs').addEventListener('click', () => openPicker({ title: 'Elegir imágenes', type: 'image' }));
+  $('#tbPhotos').addEventListener('click', openPhotos);
+  $('#pClose').addEventListener('click', () => $('#photosDrawer').classList.add('hidden'));
+  $('#pfPlay').addEventListener('click', () => { PF.on ? pfStop(false) : pfStart(); });
+  ['pfMin', 'pfMax', 'pfStayMin', 'pfStayMax', 'pfCount'].forEach(id => $('#' + id).addEventListener('input', readPhotos));
+  ['pfFolder', 'pfSub'].forEach(id => $('#' + id).addEventListener('change', pfRefreshInfo));
   $('#rClose').addEventListener('click', () => $('#rhythm').classList.add('hidden'));
 
   // Modal: cerrar tocando afuera
@@ -1092,10 +1390,11 @@ function bindUI() {
   window.addEventListener('resize', () => { if (!$('#screen').classList.contains('hidden')) applyLayout(); });
 
   // Ritmo
-  ['rMode', 'rFixed', 'rMin', 'rMax', 'rPer', 'rVol', 'rSound', 'rVib'].forEach(id => $('#' + id).addEventListener('input', readRhythm));
+  ['rMode', 'rFixed', 'rMin', 'rMax', 'rPer', 'rVol', 'rSound', 'rVib', 'rRest', 'rRestEvery', 'rRestFor', 'rFinalBpm'].forEach(id => $('#' + id).addEventListener('input', readRhythm));
   $('#rPlay').addEventListener('click', () => { R.on ? stopRhythm() : startRhythm(); });
   if (!navigator.vibrate) $('#rVibRow').classList.add('hidden');
   readRhythm();
+  readPhotos();
   document.addEventListener('visibilitychange', () => { if (R.on && document.visibilityState === 'visible') wakeOn(); });
 
   // Bloqueo automático y tecla de pánico

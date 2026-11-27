@@ -155,3 +155,17 @@ output{color:var(--cy);font-weight:600}
   .grid{grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px}
   .tab{padding:8px 8px}
 }
+
+/* Galería, fotos al azar, filtros */
+.gal{position:relative;width:100%;height:100%;background:#000}
+.gal img{width:100%;height:100%;object-fit:contain;display:block;cursor:zoom-in}
+.gnav{position:absolute;top:50%;transform:translateY(-50%);background:#000a;border:1px solid var(--line);color:#fff;font-size:22px;width:36px;height:48px;border-radius:8px;cursor:pointer}
+.gprev{left:6px}.gnext{right:6px}
+.gcnt{position:absolute;left:8px;bottom:6px;background:#000a;border-radius:6px;padding:1px 8px;font-size:12px}
+#typeBar{margin-bottom:6px}
+#photoLayer{position:fixed;inset:0;pointer-events:none;z-index:30;overflow:hidden}
+.pop{position:absolute;opacity:0;transform:scale(.94) rotate(var(--rot,0deg));transition:opacity 1.3s ease,transform 1.3s ease;border-radius:10px;box-shadow:0 10px 40px #000c;object-fit:contain}
+.pop.in{opacity:1;transform:scale(1) rotate(var(--rot,0deg))}
+.pkrow.on{background:var(--bg3);border-color:var(--cy)}
+.pkrow .pkchk{width:auto;margin:0 8px 0 0}
+.btn.ghost.on{border-color:var(--mg);color:var(--mg);box-shadow:0 0 10px #ff2bd655}

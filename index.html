@@ -31,6 +31,7 @@
       <button class="tab" data-tab="screen">Pantalla <span id="pCount" class="count"></span></button>
     </nav>
     <span class="grow"></span>
+    <button id="btnFinale" class="btn ghost small" title="Velocidad rápida para el final">⚡ Final</button>
     <button id="btnRhythm" class="btn ghost small">Ritmo</button>
     <button id="btnLock" class="btn danger small" title="Bloquear ya (también: Esc dos veces)">✕</button>
   </header>
@@ -52,6 +53,12 @@
             <button id="btnAdd" class="btn">＋ Agregar</button>
           </div>
         </div>
+        <div id="typeBar" class="subs">
+          <button class="chip on" data-type="all">Todo</button>
+          <button class="chip" data-type="video">Videos</button>
+          <button class="chip" data-type="image">Imágenes</button>
+          <button class="chip" data-type="link">Links</button>
+        </div>
         <div id="subs" class="subs"></div>
         <div id="grid" class="grid"></div>
         <p id="emptyLib" class="muted hidden">No hay nada acá todavía. Tocá “＋ Agregar”.</p>
@@ -62,12 +69,14 @@
     <section id="screen" class="hidden">
       <div class="toolbar">
         <button id="tbLib" class="btn small">＋ De la biblioteca</button>
+        <button id="tbImgs" class="btn small">＋ Imágenes</button>
         <form id="quickForm" class="quick">
           <input id="quickUrl" placeholder="Pegar link de X o PH">
           <button class="btn small" type="submit">Agregar</button>
         </form>
         <button id="tbMode" class="btn ghost small">Modo: Cuadrícula</button>
         <button id="tbBg" class="btn ghost small">Fondo</button>
+        <button id="tbPhotos" class="btn ghost small">Fotos al azar</button>
         <button id="tbSave" class="btn ghost small">Guardar escena</button>
         <button id="tbScenes" class="btn ghost small">Escenas</button>
         <button id="tbStop" class="btn ghost small">Pausar todo</button>
@@ -84,6 +93,37 @@
   </main>
 </div>
 
+<!-- FOTOS AL AZAR (capa que flota sobre todo) -->
+<div id="photoLayer"></div>
+
+<!-- FOTOS AL AZAR: ajustes -->
+<aside id="photosDrawer" class="drawer hidden">
+  <div class="dhead"><b>Fotos al azar</b><button id="pClose" class="icon">✕</button></div>
+  <p class="muted s">Van apareciendo fotos en cualquier lugar de la pantalla y se desvanecen solas.</p>
+  <button id="pfPlay" class="btn big">▶ Iniciar</button>
+
+  <label>De qué carpeta salen
+    <select id="pfFolder"></select></label>
+  <label class="chk"><input id="pfSub" type="checkbox" checked> Incluir subcarpetas</label>
+  <p id="pfInfo" class="muted s"></p>
+
+  <label>Aparece una nueva cada, entre <output id="oPfMin">3</output> y <output id="oPfMax">12</output> seg
+    <input id="pfMin" type="range" min="1" max="120" value="3">
+    <input id="pfMax" type="range" min="1" max="120" value="12"></label>
+  <label>Se queda, entre <output id="oPfStayMin">3</output> y <output id="oPfStayMax">8</output> seg
+    <input id="pfStayMin" type="range" min="1" max="60" value="3">
+    <input id="pfStayMax" type="range" min="1" max="60" value="8"></label>
+  <label>Tamaño
+    <select id="pfSize">
+      <option value="r">Al azar</option>
+      <option value="s">Chicas</option>
+      <option value="m">Medianas</option>
+      <option value="l">Grandes</option>
+    </select></label>
+  <label>Máximo a la vez <output id="oPfCount">3</output>
+    <input id="pfCount" type="range" min="1" max="8" value="3"></label>
+</aside>
+
 <!-- RITMO -->
 <aside id="rhythm" class="drawer hidden">
   <div class="dhead"><b>Ritmo</b><button id="rClose" class="icon">✕</button></div>
@@ -96,23 +136,36 @@
       <option value="ramp">Sube y baja</option>
       <option value="wave">Olas suaves</option>
       <option value="steps">Escalones</option>
-      <option value="random">Al azar</option>
+      <option value="jump">Saltos bruscos</option>
+      <option value="random">Al azar (cambio suave)</option>
     </select>
   </label>
 
   <div id="rFixedRow">
     <label>Velocidad <output id="oFixed">80</output>
-      <input id="rFixed" type="range" min="30" max="220" value="80"></label>
+      <input id="rFixed" type="range" min="30" max="300" value="80"></label>
   </div>
 
   <div id="rRangeRow" class="hidden">
     <label>Mínima <output id="oMin">60</output>
-      <input id="rMin" type="range" min="30" max="220" value="60"></label>
+      <input id="rMin" type="range" min="30" max="300" value="60"></label>
     <label>Máxima <output id="oMax">120</output>
-      <input id="rMax" type="range" min="30" max="220" value="120"></label>
-    <label>Cambia cada <output id="oPer">30</output> seg
-      <input id="rPer" type="range" min="5" max="120" value="30"></label>
+      <input id="rMax" type="range" min="30" max="300" value="120"></label>
+    <label>Cambia cada ~ <output id="oPer">30</output> seg
+      <input id="rPer" type="range" min="3" max="120" value="30"></label>
   </div>
+
+  <label class="chk"><input id="rRest" type="checkbox"> Hacer descansos en el medio</label>
+  <div id="rRestRow" class="hidden">
+    <label>Descansa cada ~ <output id="oRestEvery">60</output> seg
+      <input id="rRestEvery" type="range" min="10" max="300" value="60"></label>
+    <label>Dura ~ <output id="oRestFor">8</output> seg
+      <input id="rRestFor" type="range" min="2" max="60" value="8"></label>
+    <p class="muted s">Los tiempos varían un poco al azar para que no sea siempre igual.</p>
+  </div>
+
+  <label>Velocidad del final (botón ⚡ de arriba) <output id="oFinal">180</output>
+    <input id="rFinalBpm" type="range" min="60" max="300" value="180"></label>
 
   <label>Sonido
     <select id="rSound">
