@@ -15,7 +15,7 @@ let sb = null;
 const S = {
   user: null, folders: [], items: [], layouts: [],
   view: { type: 'all', id: null }, search: '', tag: null, sort: 'new', type: 'all', lastErr: '',
-  panels: [], mode: 'grid', bg: null, urls: {}, z: 10
+  panels: [], mode: 'free', textsRow: null, bg: null, urls: {}, z: 10
 };
 
 let toastT;
@@ -28,6 +28,7 @@ function toast(msg) {
 }
 
 function openModal(html) {
+  $('#modalBody').style.maxWidth = '';
   $('#modalBody').innerHTML = html;
   $('#modal').classList.remove('hidden');
   return $('#modalBody');
@@ -149,6 +150,7 @@ async function start(user) {
   $('#app').classList.remove('hidden');
   setTab('lib');
   await loadAll();
+  applyTextsToUI();
   render();
   bumpIdle();
 }
@@ -156,6 +158,8 @@ async function start(user) {
 async function lock() {
   stopRhythm();
   pfStop(true);
+  $$('.float').forEach(f => f.remove());
+  S.textsRow = null; $('#ptList').value = ''; $('#ptOn').checked = false; PF.sel.clear();
   $('#photosDrawer').classList.add('hidden');
   clearPanels();
   try { if (document.fullscreenElement) document.exitFullscreen(); } catch (e) {}
@@ -192,7 +196,9 @@ async function loadAll() {
   if (err) toast('Error al cargar: ' + err.message);
   S.folders = f.data || [];
   S.items = i.data || [];
-  S.layouts = l.data || [];
+  const all = l.data || [];
+  S.textsRow = all.find(x => x.name === '__textos__') || null;
+  S.layouts = all.filter(x => x.name !== '__textos__');
 }
 
 async function patchItem(it, patch) {
@@ -500,12 +506,15 @@ function editItem(id) {
     </div>
     <div class="row">
       <button class="btn danger small" data-act="del">Eliminar</button>
+      ${(it.kind === 'file' && (it.mime || '').startsWith('image')) ? '<button class="btn ghost small" data-act="crop">Recortar / girar</button>' : ''}
       <span class="grow"></span>
       ${it.url ? `<a class="btn ghost small" href="${esc(it.url)}" target="_blank" rel="noopener noreferrer">Abrir original</a>` : ''}
       <button class="btn ghost small" data-act="cancel">Cancelar</button>
       <button class="btn small" data-act="save">Guardar</button>
     </div>`);
   $('[data-act=cancel]', b).onclick = closeModal;
+  const cropBtn = $('[data-act=crop]', b);
+  if (cropBtn) cropBtn.onclick = () => { closeModal(); openEditor(it); };
   $('[data-act=save]', b).onclick = async () => {
     const patch = {
       title: $('#eT', b).value.trim() || null,
@@ -579,6 +588,10 @@ function buildPanel(p) {
     const w = document.createElement('div');
     w.className = 'xwrap';
     body.appendChild(w);
+    const hn = document.createElement('p');
+    hn.className = 'xhint';
+    hn.textContent = 'Si dice “no encontrado”: X no deja mostrar algunos posts fuera de su sitio. Abrilo con ↗.';
+    body.appendChild(hn);
     loadTwitter()
       .then(() => window.twttr.widgets.createTweet(p.ref, w, { theme: 'dark', dnt: true, conversation: 'none', align: 'center' }))
       .then(r => { if (!r) w.innerHTML = fallbackHtml(p); })
@@ -797,10 +810,31 @@ function stopAllMedia() {
 }
 
 function openLightbox(u) {
-  const b = openModal(`<img src="${esc(u)}" alt="" style="width:100%;max-height:78vh;object-fit:contain;border-radius:8px">
-    <div class="row end"><button class="btn ghost" data-act="close">Cerrar</button></div>`);
-  $('#modalBody').style.maxWidth = 'min(92vw, 1000px)';
-  $('[data-act=close]', b).onclick = closeModal;
+  const vw = window.innerWidth, vh = window.innerHeight;
+  const W = Math.min(vw - 20, 720), H = Math.min(vh - 80, 540);
+  const w = document.createElement('div');
+  w.className = 'float';
+  w.style.left = Math.max(0, Math.round((vw - W) / 2)) + 'px';
+  w.style.top = Math.max(0, Math.round((vh - H) / 2)) + 'px';
+  w.style.width = W + 'px';
+  w.style.height = H + 'px';
+  w.style.zIndex = ++S.z + 50;
+  w.innerHTML = `<div class="fhead"><span>Imagen (arrastrá para mover)</span><button class="icon" data-x>✕</button></div><div class="fbody"><img alt=""></div><div class="fresize"></div>`;
+  $('img', w).src = u;
+  document.body.appendChild(w);
+  w.addEventListener('pointerdown', () => { w.style.zIndex = ++S.z + 50; }, true);
+  $('[data-x]', w).onclick = () => w.remove();
+  const head = $('.fhead', w), grip = $('.fresize', w);
+  const dragger = (el, onMove) => el.addEventListener('pointerdown', e => {
+    if (e.target.closest('[data-x]')) return;
+    e.preventDefault(); el.setPointerCapture(e.pointerId);
+    const sx = e.clientX, sy = e.clientY, ox = w.offsetLeft, oy = w.offsetTop, ow = w.offsetWidth, oh = w.offsetHeight;
+    const mv = ev => onMove(ev.clientX - sx, ev.clientY - sy, ox, oy, ow, oh);
+    const up = () => { el.removeEventListener('pointermove', mv); el.removeEventListener('pointerup', up); el.removeEventListener('pointercancel', up); };
+    el.addEventListener('pointermove', mv); el.addEventListener('pointerup', up); el.addEventListener('pointercancel', up);
+  });
+  dragger(head, (dx, dy, ox, oy) => { w.style.left = Math.max(0, ox + dx) + 'px'; w.style.top = Math.max(0, oy + dy) + 'px'; });
+  dragger(grip, (dx, dy, ox, oy, ow, oh) => { w.style.width = Math.max(160, ow + dx) + 'px'; w.style.height = Math.max(120, oh + dy) + 'px'; });
 }
 
 function openPicker(opts) {
@@ -838,8 +872,10 @@ function openPicker(opts) {
   const draw = () => {
     const list = filtered();
     $('#pkList', b).innerHTML = list.map(i =>
-      `<div class="pkrow ${sel.has(i.id) ? 'on' : ''}" data-id="${i.id}">${single ? '' : `<input type="checkbox" class="pkchk" ${sel.has(i.id) ? 'checked' : ''} tabindex="-1">`}<span class="badge s">${kindLabel(i)}</span><span>${esc(i.title || defaultTitle(i))}</span></div>`
+      `<div class="pkrow ${sel.has(i.id) ? 'on' : ''}" data-id="${i.id}">${single ? '' : `<input type="checkbox" class="pkchk" ${sel.has(i.id) ? 'checked' : ''} tabindex="-1">`}<span class="pkth">${(i.kind === 'file' && (i.mime || '').startsWith('image')) ? `<img data-path="${esc(i.file_path)}" loading="lazy" alt="">` : (i.kind === 'file' ? '🎬' : (i.kind === 'x' ? 'X' : 'PH'))}</span><span class="badge s">${kindLabel(i)}</span><span>${esc(i.title || defaultTitle(i))}</span></div>`
     ).join('') || '<p class="muted">No hay nada para elegir.</p>';
+    const th = $$('#pkList img[data-path]', b);
+    if (th.length) signedUrls(th.map(x => x.dataset.path)).then(us => th.forEach((x, k) => { if (us[k] && x.isConnected) x.src = us[k]; }));
     updSel();
   };
   draw();
@@ -1140,24 +1176,30 @@ function toggleFinale() {
 }
 
 /* =====================================================
-   FOTOS AL AZAR (aparecen, flotan y se desvanecen)
+   FOTOS AL AZAR (aparecen, flotan y se desvanecen) + TEXTOS
    ===================================================== */
-const PF = { on: false, timer: null, last: null, active: 0 };
+const PF = { on: false, timer: null, tTimer: null, last: null, active: 0, sel: new Set(), solo: false };
 const rnd = (a, b) => a + Math.random() * (b - a);
+const NEON = ['#00e5ff', '#ff2bd6', '#ffffff', '#ffd24a', '#7dff6b'];
 
 function pfImages() {
-  const folderId = $('#pfFolder').value;
   let list = S.items.filter(i => i.kind === 'file' && (i.mime || '').startsWith('image'));
-  if (folderId) {
-    const ids = $('#pfSub').checked ? descendantIds(folderId) : [folderId];
+  if (PF.sel.size) {
+    let ids = [];
+    PF.sel.forEach(id => { ids = ids.concat($('#pfSub').checked ? descendantIds(id) : [id]); });
     list = list.filter(i => ids.includes(i.folder_id));
   }
   return list;
 }
 
+function pfTexts() {
+  if (!$('#ptOn').checked) return [];
+  return $('#ptList').value.split('\n').map(x => x.trim()).filter(Boolean);
+}
+
 function pfRefreshInfo() {
-  const n = pfImages().length;
-  $('#pfInfo').textContent = n ? `${n} imágenes disponibles` : 'No hay imágenes en esa carpeta.';
+  const n = pfImages().length, t = pfTexts().length;
+  $('#pfInfo').textContent = (n ? `${n} imágenes disponibles` : 'No hay imágenes en esa selección.') + (t ? ` · ${t} textos` : '');
 }
 
 function readPhotos() {
@@ -1166,6 +1208,35 @@ function readPhotos() {
   $('#oPfStayMin').textContent = $('#pfStayMin').value;
   $('#oPfStayMax').textContent = $('#pfStayMax').value;
   $('#oPfCount').textContent = $('#pfCount').value;
+  $('#oPtMin').textContent = $('#ptMin').value;
+  $('#oPtMax').textContent = $('#ptMax').value;
+  $('#oPtStay').textContent = $('#ptStay').value;
+}
+
+/* Los textos se guardan en la nube (en la tabla de escenas, con un nombre especial) */
+let ptSaveT;
+function saveTexts() {
+  clearTimeout(ptSaveT);
+  ptSaveT = setTimeout(async () => {
+    if (!S.user) return;
+    const data = { on: $('#ptOn').checked, list: $('#ptList').value, min: +$('#ptMin').value, max: +$('#ptMax').value, stay: +$('#ptStay').value };
+    if (S.textsRow) {
+      const { error } = await sb.from('layouts').update({ data }).eq('id', S.textsRow.id);
+      if (!error) S.textsRow.data = data;
+    } else {
+      const { data: row } = await sb.from('layouts').insert({ name: '__textos__', data }).select().single();
+      if (row) S.textsRow = row;
+    }
+  }, 800);
+}
+function applyTextsToUI() {
+  const d = (S.textsRow && S.textsRow.data) || {};
+  $('#ptOn').checked = !!d.on;
+  $('#ptList').value = d.list || '';
+  if (d.min) $('#ptMin').value = d.min;
+  if (d.max) $('#ptMax').value = d.max;
+  if (d.stay) $('#ptStay').value = d.stay;
+  readPhotos();
 }
 
 function pfSchedule() {
@@ -1173,8 +1244,14 @@ function pfSchedule() {
   const lo = +$('#pfMin').value, hi = Math.max(lo, +$('#pfMax').value);
   PF.timer = setTimeout(() => { pfShow(); pfSchedule(); }, rnd(lo, hi) * 1000);
 }
+function ptSchedule() {
+  if (!PF.on) return;
+  const lo = +$('#ptMin').value, hi = Math.max(lo, +$('#ptMax').value);
+  PF.tTimer = setTimeout(() => { ptShow(); ptSchedule(); }, rnd(lo, hi) * 1000);
+}
 
 async function pfShow() {
+  bumpIdle();
   const list = pfImages();
   if (!list.length || PF.active >= +$('#pfCount').value) return;
   let it = list[Math.floor(Math.random() * list.length)];
@@ -1211,23 +1288,72 @@ async function pfShow() {
   $('#photoLayer').appendChild(img);
 }
 
+function ptShow() {
+  const lines = pfTexts();
+  if (!lines.length) return;
+  const el = document.createElement('div');
+  el.className = 'popt';
+  el.textContent = lines[Math.floor(Math.random() * lines.length)];
+  el.style.fontSize = Math.round(rnd(24, 64)) + 'px';
+  el.style.color = NEON[Math.floor(Math.random() * NEON.length)];
+  el.style.visibility = 'hidden';
+  const layer = $('#photoLayer');
+  layer.appendChild(el);
+  const vw = window.innerWidth, vh = window.innerHeight;
+  el.style.left = Math.round(rnd(0, Math.max(0, vw - el.offsetWidth))) + 'px';
+  el.style.top = Math.round(rnd(0, Math.max(0, vh - el.offsetHeight))) + 'px';
+  el.style.visibility = '';
+  requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('in')));
+  const stay = +$('#ptStay').value;
+  setTimeout(() => { el.classList.remove('in'); setTimeout(() => el.remove(), 1100); }, stay * 1000 * rnd(0.7, 1.3));
+}
+
 function pfStart() {
-  if (!pfImages().length) { toast('No hay imágenes en esa carpeta.'); return; }
+  if (!pfImages().length && !pfTexts().length) { toast('No hay imágenes ni textos para mostrar.'); return false; }
   PF.on = true;
   $('#pfPlay').textContent = '■ Detener';
-  pfShow();
-  pfSchedule();
+  pfShow(); pfSchedule();
+  ptShow(); ptSchedule();
+  return true;
 }
 
 function pfStop(instant) {
   PF.on = false;
-  clearTimeout(PF.timer);
-  const layer = $('#photoLayer');
-  if (instant) layer.innerHTML = '';
-  else $$('.pop', layer).forEach(p => { p.classList.remove('in'); setTimeout(() => p.remove(), 1400); });
+  clearTimeout(PF.timer); clearTimeout(PF.tTimer);
+  exitSolo();
+  const els = $$('#photoLayer .pop, #photoLayer .popt');
+  if (instant) els.forEach(p => p.remove());
+  else els.forEach(p => { p.classList.remove('in'); setTimeout(() => p.remove(), 1400); });
   PF.active = 0;
   const btn = $('#pfPlay');
   if (btn) btn.textContent = '▶ Iniciar';
+}
+
+function enterSolo() {
+  if (!PF.on && !pfStart()) return;
+  const layer = $('#photoLayer');
+  PF.solo = true;
+  layer.classList.add('solo');
+  $('#pfExit').classList.remove('hidden');
+  $('#photosDrawer').classList.add('hidden');
+  try {
+    const r = layer.requestFullscreen || layer.webkitRequestFullscreen;
+    if (r) { const p = r.call(layer); if (p && p.catch) p.catch(() => {}); }
+  } catch (e) {}
+}
+function exitSolo() {
+  if (!PF.solo) return;
+  PF.solo = false;
+  $('#photoLayer').classList.remove('solo');
+  $('#pfExit').classList.add('hidden');
+  try { if (document.fullscreenElement) document.exitFullscreen(); } catch (e) {}
+}
+
+function renderPfFolders() {
+  const fl = flatFolders();
+  $('#pfFolders').innerHTML = fl.length
+    ? fl.map(({ f, depth }) => `<label class="chk" style="margin:6px 0 0 ${depth * 14}px"><input type="checkbox" data-f="${f.id}" ${PF.sel.has(f.id) ? 'checked' : ''}> 📁 ${esc(f.name)}</label>`).join('')
+    : '<p class="muted s">Todavía no hay carpetas: se usan todas las imágenes.</p>';
 }
 
 function openPhotos() {
@@ -1235,12 +1361,132 @@ function openPhotos() {
   const wasHidden = d.classList.contains('hidden');
   $('#rhythm').classList.add('hidden');
   if (!wasHidden) { d.classList.add('hidden'); return; }
-  const cur = $('#pfFolder').value;
-  $('#pfFolder').innerHTML = `<option value="">Todas las imágenes</option>` + flatFolders().map(({ f, depth }) =>
-    `<option value="${f.id}" ${f.id === cur ? 'selected' : ''}>${'— '.repeat(depth)}${esc(f.name)}</option>`).join('');
+  renderPfFolders();
   d.classList.remove('hidden');
   readPhotos();
   pfRefreshInfo();
+}
+
+/* =====================================================
+   EDITOR DE FOTOS: recortar y girar de a 90°
+   ===================================================== */
+async function openEditor(it) {
+  const arr = await signedUrls([it.file_path]);
+  if (!arr[0]) { toast('No pude abrir la imagen'); return; }
+  let bmp;
+  try {
+    const r = await fetch(arr[0]);
+    bmp = await createImageBitmap(await r.blob());
+  } catch (e) { toast('No pude abrir la imagen'); return; }
+
+  const b = openModal(`<h3>Recortar y girar</h3>
+    <div class="edwrap"><canvas id="edCv"></canvas></div>
+    <p class="muted s">Arrastrá sobre la foto para marcar la parte que querés conservar.</p>
+    <div class="row">
+      <button class="btn ghost small" data-act="l">⟲ 90°</button>
+      <button class="btn ghost small" data-act="r">⟳ 90°</button>
+      <button class="btn ghost small" data-act="noc">Quitar recorte</button>
+      <span id="edInfo" class="muted s"></span>
+    </div>
+    <div class="row end">
+      <button class="btn ghost" data-act="cancel">Cancelar</button>
+      <button class="btn ghost" data-act="copy">Guardar como copia</button>
+      <button class="btn" data-act="save">Guardar</button>
+    </div>`);
+  $('#modalBody').style.maxWidth = '760px';
+
+  let rot = 0, crop = null;
+  const cv = $('#edCv', b), ctx = cv.getContext('2d');
+  const dims = () => (rot % 180 === 0) ? [bmp.width, bmp.height] : [bmp.height, bmp.width];
+  const paint = (c2, W, H, sc) => {
+    c2.save();
+    c2.translate(W / 2, H / 2);
+    c2.rotate(rot * Math.PI / 180);
+    c2.drawImage(bmp, -bmp.width * sc / 2, -bmp.height * sc / 2, bmp.width * sc, bmp.height * sc);
+    c2.restore();
+  };
+  const draw = () => {
+    const [rw, rh] = dims();
+    const sc = Math.min(1, Math.min(window.innerWidth - 80, 700) / rw, window.innerHeight * 0.5 / rh);
+    cv.width = Math.max(1, Math.round(rw * sc));
+    cv.height = Math.max(1, Math.round(rh * sc));
+    ctx.clearRect(0, 0, cv.width, cv.height);
+    paint(ctx, cv.width, cv.height, sc);
+    if (crop) {
+      const x = crop.x * cv.width, y = crop.y * cv.height, w = crop.w * cv.width, h = crop.h * cv.height;
+      ctx.fillStyle = 'rgba(0,0,0,.6)';
+      ctx.fillRect(0, 0, cv.width, y);
+      ctx.fillRect(0, y + h, cv.width, cv.height - y - h);
+      ctx.fillRect(0, y, x, h);
+      ctx.fillRect(x + w, y, cv.width - x - w, h);
+      ctx.strokeStyle = '#00e5ff'; ctx.lineWidth = 2;
+      ctx.strokeRect(x, y, w, h);
+    }
+    const cw = Math.round(rw * (crop ? crop.w : 1)), ch = Math.round(rh * (crop ? crop.h : 1));
+    $('#edInfo', b).textContent = `${cw} × ${ch} px`;
+  };
+  draw();
+
+  let start = null;
+  const pos = e => {
+    const r = cv.getBoundingClientRect();
+    return { x: Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)), y: Math.min(1, Math.max(0, (e.clientY - r.top) / r.height)) };
+  };
+  cv.addEventListener('pointerdown', e => { e.preventDefault(); cv.setPointerCapture(e.pointerId); start = pos(e); });
+  cv.addEventListener('pointermove', e => {
+    if (!start) return;
+    const p = pos(e);
+    crop = { x: Math.min(start.x, p.x), y: Math.min(start.y, p.y), w: Math.abs(p.x - start.x), h: Math.abs(p.y - start.y) };
+    draw();
+  });
+  const end = () => { if (crop && (crop.w < 0.03 || crop.h < 0.03)) { crop = null; draw(); } start = null; };
+  cv.addEventListener('pointerup', end);
+  cv.addEventListener('pointercancel', end);
+
+  const save = async asCopy => {
+    if (rot === 0 && !crop) { toast('No hiciste cambios'); return; }
+    const [rw, rh] = dims();
+    const lim = Math.min(1, 8000 / Math.max(rw, rh));
+    const fw = Math.max(1, Math.round(rw * lim)), fh = Math.max(1, Math.round(rh * lim));
+    const full = document.createElement('canvas');
+    full.width = fw; full.height = fh;
+    paint(full.getContext('2d'), fw, fh, lim);
+    const cx = crop ? Math.round(crop.x * fw) : 0, cy = crop ? Math.round(crop.y * fh) : 0;
+    const cw = crop ? Math.max(1, Math.round(crop.w * fw)) : fw, ch = crop ? Math.max(1, Math.round(crop.h * fh)) : fh;
+    const out = document.createElement('canvas');
+    out.width = cw; out.height = ch;
+    out.getContext('2d').drawImage(full, cx, cy, cw, ch, 0, 0, cw, ch);
+    const png = it.mime === 'image/png';
+    const mime = png ? 'image/png' : 'image/jpeg';
+    const blob = await new Promise(res => out.toBlob(res, mime, 0.92));
+    if (!blob) { toast('No se pudo generar la imagen'); return; }
+    const btns = $$('[data-act]', b); btns.forEach(x => x.disabled = true);
+    const path = `${S.user.id}/${uid()}.${png ? 'png' : 'jpg'}`;
+    const up = await sb.storage.from(BUCKET).upload(path, blob, { contentType: mime, upsert: false });
+    if (up.error) { toast('No se pudo guardar: ' + errText(up.error)); btns.forEach(x => x.disabled = false); return; }
+    if (asCopy) {
+      const row = { kind: 'file', file_path: path, mime, title: (it.title || 'Imagen') + ' (editada)', folder_id: it.folder_id, tags: it.tags || [] };
+      const { data, error } = await sb.from('items').insert(row).select().single();
+      if (error) { toast('No se pudo guardar: ' + errText(error)); await sb.storage.from(BUCKET).remove([path]); btns.forEach(x => x.disabled = false); return; }
+      S.items.unshift(data);
+    } else {
+      const old = it.file_path;
+      if (!(await patchItem(it, { file_path: path, mime }))) { await sb.storage.from(BUCKET).remove([path]); btns.forEach(x => x.disabled = false); return; }
+      await sb.storage.from(BUCKET).remove([old]);
+      delete S.urls[old];
+    }
+    closeModal(); render(); toast('Guardado');
+  };
+
+  $$('[data-act]', b).forEach(btn => btn.onclick = () => {
+    const a = btn.dataset.act;
+    if (a === 'cancel') closeModal();
+    else if (a === 'l') { rot = (rot + 270) % 360; crop = null; draw(); }
+    else if (a === 'r') { rot = (rot + 90) % 360; crop = null; draw(); }
+    else if (a === 'noc') { crop = null; draw(); }
+    else if (a === 'copy') save(true);
+    else if (a === 'save') save(false);
+  });
 }
 
 /* =====================================================
@@ -1294,8 +1540,18 @@ function bindUI() {
   $('#tbPhotos').addEventListener('click', openPhotos);
   $('#pClose').addEventListener('click', () => $('#photosDrawer').classList.add('hidden'));
   $('#pfPlay').addEventListener('click', () => { PF.on ? pfStop(false) : pfStart(); });
-  ['pfMin', 'pfMax', 'pfStayMin', 'pfStayMax', 'pfCount'].forEach(id => $('#' + id).addEventListener('input', readPhotos));
-  ['pfFolder', 'pfSub'].forEach(id => $('#' + id).addEventListener('change', pfRefreshInfo));
+  ['pfMin', 'pfMax', 'pfStayMin', 'pfStayMax', 'pfCount', 'ptMin', 'ptMax', 'ptStay'].forEach(id => $('#' + id).addEventListener('input', () => { readPhotos(); if (/^pt/.test(id)) saveTexts(); }));
+  ['ptOn', 'ptList'].forEach(id => $('#' + id).addEventListener('input', () => { pfRefreshInfo(); saveTexts(); }));
+  $('#pfSub').addEventListener('change', pfRefreshInfo);
+  $('#pfFolders').addEventListener('change', e => {
+    const c = e.target.closest('[data-f]');
+    if (!c) return;
+    if (c.checked) PF.sel.add(c.dataset.f); else PF.sel.delete(c.dataset.f);
+    pfRefreshInfo();
+  });
+  $('#pfFull').addEventListener('click', enterSolo);
+  $('#pfExit').addEventListener('click', exitSolo);
+  document.addEventListener('fullscreenchange', () => { if (!document.fullscreenElement && PF.solo) exitSolo(); });
   $('#rClose').addEventListener('click', () => $('#rhythm').classList.add('hidden'));
 
   // Modal: cerrar tocando afuera

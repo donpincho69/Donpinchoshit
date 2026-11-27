@@ -74,7 +74,7 @@
           <input id="quickUrl" placeholder="Pegar link de X o PH">
           <button class="btn small" type="submit">Agregar</button>
         </form>
-        <button id="tbMode" class="btn ghost small">Modo: Cuadrícula</button>
+        <button id="tbMode" class="btn ghost small">Modo: Libre</button>
         <button id="tbBg" class="btn ghost small">Fondo</button>
         <button id="tbPhotos" class="btn ghost small">Fotos al azar</button>
         <button id="tbSave" class="btn ghost small">Guardar escena</button>
@@ -83,7 +83,7 @@
         <button id="tbClear" class="btn ghost small">Vaciar</button>
       </div>
       <div class="stage">
-        <div id="canvas" class="canvas grid"></div>
+        <div id="canvas" class="canvas free"></div>
         <div id="emptyCanvas" class="emptyc">
           <p>La pantalla está vacía.</p>
           <p class="muted">Agregá videos o imágenes desde la biblioteca, o pegá un link arriba. Podés poner todos los que quieras.</p>
@@ -94,16 +94,17 @@
 </div>
 
 <!-- FOTOS AL AZAR (capa que flota sobre todo) -->
-<div id="photoLayer"></div>
+<div id="photoLayer"><button id="pfExit" class="hidden">✕ Salir</button></div>
 
 <!-- FOTOS AL AZAR: ajustes -->
 <aside id="photosDrawer" class="drawer hidden">
   <div class="dhead"><b>Fotos al azar</b><button id="pClose" class="icon">✕</button></div>
   <p class="muted s">Van apareciendo fotos en cualquier lugar de la pantalla y se desvanecen solas.</p>
   <button id="pfPlay" class="btn big">▶ Iniciar</button>
+  <button id="pfFull" class="btn ghost big">⛶ Solo fotos, pantalla completa</button>
 
-  <label>De qué carpeta salen
-    <select id="pfFolder"></select></label>
+  <label>De qué carpetas salen (sin tildar nada = todas)</label>
+  <div id="pfFolders" class="pfl"></div>
   <label class="chk"><input id="pfSub" type="checkbox" checked> Incluir subcarpetas</label>
   <p id="pfInfo" class="muted s"></p>
 
@@ -122,6 +123,17 @@
     </select></label>
   <label>Máximo a la vez <output id="oPfCount">3</output>
     <input id="pfCount" type="range" min="1" max="8" value="3"></label>
+
+  <hr class="sep">
+  <label class="chk"><input id="ptOn" type="checkbox"> Mostrar textos que saltan</label>
+  <label>Textos (uno por línea)
+    <textarea id="ptList" rows="4" placeholder="Escribí una frase por línea"></textarea></label>
+  <label>Aparece uno cada, entre <output id="oPtMin">4</output> y <output id="oPtMax">15</output> seg
+    <input id="ptMin" type="range" min="1" max="120" value="4">
+    <input id="ptMax" type="range" min="1" max="120" value="15"></label>
+  <label>Se queda ~ <output id="oPtStay">4</output> seg
+    <input id="ptStay" type="range" min="1" max="30" value="4"></label>
+  <p class="muted s">Los textos se guardan en tu nube, así los tenés en el celu y la compu.</p>
 </aside>
 
 <!-- RITMO -->
